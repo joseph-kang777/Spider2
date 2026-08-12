@@ -8,7 +8,7 @@
 
 ## 📰 News 
 
-- <span style="color: red;">**2026-08-12**: We sincerely apologize for the ongoing disruption to Spider 2.0-Snow access. The Snowflake evaluation account is currently experiencing an unexpected suspension issue, and we are working urgently with the Snowflake team to resolve it as quickly as possible. Thank you for your patience and understanding.</span>
+- **2026-08-12**: We sincerely apologize for the ongoing disruption to Spider 2.0-Snow access. The Snowflake evaluation account is currently experiencing an unexpected suspension issue, and we are working urgently with the Snowflake team to resolve it as quickly as possible. Thank you for your patience and understanding.
 
 - **2025-11-06**: We apologize for the recent Snowflake login and credential issues caused by Snowflake’s password & MFA policy upgrade. Both **Web UI login** and **Python credential access** behaviors have changed.  
   Please **carefully review the updated Snowflake guideline** before continuing:

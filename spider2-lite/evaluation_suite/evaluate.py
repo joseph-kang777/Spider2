@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -169,7 +170,15 @@ def get_bigquery_sql_result(sql_query: str, is_save: bool, save_dir=None, file_n
         return False, error_message
 
 
-def get_sqlite_result(db_path: str, query: str, save_dir=None, file_name: str = "result.csv", chunksize: int = 500, instance_id: str = None):
+def get_sqlite_result(
+    db_path: str,
+    query: str,
+    save_dir=None,
+    file_name: str = "result.csv",
+    chunksize: int = 500,
+    instance_id: str = None,
+    timeout: int = None,
+):
     prefix = f"[{instance_id}] " if instance_id else ""
 
     try:
@@ -177,18 +186,35 @@ def get_sqlite_result(db_path: str, query: str, save_dir=None, file_name: str = 
         memory_conn = sqlite3.connect(":memory:")
         conn.backup(memory_conn)
 
-        try:
-            if save_dir:
-                os.makedirs(save_dir, exist_ok=True)
-                for i, chunk in enumerate(pd.read_sql_query(query, memory_conn, chunksize=chunksize)):
-                    mode = "a" if i > 0 else "w"
-                    header = i == 0
-                    chunk.to_csv(os.path.join(save_dir, file_name), mode=mode, header=header, index=False)
-                return True, None
+        deadline = time.monotonic() + timeout if timeout is not None else None
 
-            df = pd.read_sql_query(query, memory_conn)
-            return True, df
+        def query_timed_out():
+            return int(deadline is not None and time.monotonic() >= deadline)
+
+        if deadline is not None:
+            memory_conn.set_progress_handler(query_timed_out, 10_000)
+
+        try:
+            try:
+                if save_dir:
+                    os.makedirs(save_dir, exist_ok=True)
+                    for i, chunk in enumerate(pd.read_sql_query(query, memory_conn, chunksize=chunksize)):
+                        mode = "a" if i > 0 else "w"
+                        header = i == 0
+                        chunk.to_csv(os.path.join(save_dir, file_name), mode=mode, header=header, index=False)
+                    return True, None
+
+                df = pd.read_sql_query(query, memory_conn)
+                return True, df
+            except Exception as error:
+                if deadline is not None and time.monotonic() >= deadline and "interrupted" in str(error).lower():
+                    error_message = f"쿼리가 {timeout}초 후 시간 제한을 초과했습니다."
+                    print(f"{prefix}{error_message}")
+                    return False, error_message
+                raise
         finally:
+            if deadline is not None:
+                memory_conn.set_progress_handler(None, 0)
             memory_conn.close()
             conn.close()
     except Exception as e:
@@ -234,8 +260,6 @@ def evaluate_single_sql_instance(
     timeout: int = 60,
     sqlite_base_dir: Path = None,
 ):
-    del timeout  # timeout currently unused for lite databases
-
     error_info = None
     score = 0
     pred_sql_query = ""
@@ -271,6 +295,7 @@ def evaluate_single_sql_instance(
                     save_dir=str(thread_temp_dir),
                     file_name=result_file,
                     instance_id=instance_id,
+                    timeout=timeout,
                 )
         else:
             exe_flag = False

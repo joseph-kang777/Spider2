@@ -56,11 +56,33 @@ rfm AS (
                 THEN 'About to Sleep'
         END AS rfm_segment
     FROM rfm_scores
+),
+segment_summary AS (
+    SELECT
+        rfm_segment,
+        COUNT(*) AS customers_in_segment,
+        SUM(total_orders) AS segment_total_orders,
+        SUM(total_spent) AS segment_total_spend,
+        SUM(total_spent) / SUM(total_orders) AS average_sales_per_order
+    FROM rfm
+    WHERE rfm_segment IS NOT NULL
+    GROUP BY rfm_segment
+),
+overall_summary AS (
+    SELECT
+        SUM(total_spent) / SUM(total_orders) AS overall_average_sales_per_order
+    FROM rfm
+    WHERE rfm_segment IS NOT NULL
 )
 SELECT
-    rfm_segment,
-    AVG(total_spent / total_orders) AS avg_sales_per_customer
-FROM rfm
-WHERE rfm_segment IS NOT NULL
-GROUP BY rfm_segment
-ORDER BY rfm_segment;
+    segment.rfm_segment,
+    segment.customers_in_segment,
+    segment.segment_total_orders,
+    segment.segment_total_spend,
+    segment.average_sales_per_order,
+    overall.overall_average_sales_per_order,
+    segment.average_sales_per_order - overall.overall_average_sales_per_order
+        AS difference_from_overall
+FROM segment_summary AS segment
+CROSS JOIN overall_summary AS overall
+ORDER BY segment.average_sales_per_order DESC, segment.rfm_segment;

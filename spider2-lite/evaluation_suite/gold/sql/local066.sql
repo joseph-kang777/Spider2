@@ -1,128 +1,78 @@
-WITH cte_cleaned_customer_orders AS (
+WITH RECURSIVE
+delivered_pizzas AS (
     SELECT
-        *,
-        ROW_NUMBER() OVER () AS original_row_number
-    FROM 
-        pizza_clean_customer_orders
+        customer.rowid AS pizza_line_id,
+        customer.pizza_id,
+        customer.exclusions,
+        customer.extras
+    FROM pizza_clean_customer_orders AS customer
+    JOIN pizza_clean_runner_orders AS runner
+      ON customer.order_id = runner.order_id
+    WHERE runner.cancellation IS NULL
 ),
-split_regular_toppings AS (
+recipe_parts(pizza_id, topping_id, remaining) AS (
     SELECT
         pizza_id,
-        TRIM(SUBSTR(toppings, 1, INSTR(toppings || ',', ',') - 1)) AS topping_id,
-        SUBSTR(toppings || ',', INSTR(toppings || ',', ',') + 1) AS remaining_toppings
-    FROM 
-        pizza_recipes
+        TRIM(SUBSTR(toppings, 1, INSTR(toppings || ',', ',') - 1)),
+        SUBSTR(toppings || ',', INSTR(toppings || ',', ',') + 1)
+    FROM pizza_recipes
     UNION ALL
     SELECT
         pizza_id,
-        TRIM(SUBSTR(remaining_toppings, 1, INSTR(remaining_toppings, ',') - 1)) AS topping_id,
-        SUBSTR(remaining_toppings, INSTR(remaining_toppings, ',') + 1) AS remaining_toppings
-    FROM 
-        split_regular_toppings
-    WHERE
-        remaining_toppings <> ''
+        TRIM(SUBSTR(remaining, 1, INSTR(remaining, ',') - 1)),
+        SUBSTR(remaining, INSTR(remaining, ',') + 1)
+    FROM recipe_parts
+    WHERE remaining <> ''
 ),
-cte_base_toppings AS (
+exclusion_parts(pizza_line_id, topping_id, remaining) AS (
     SELECT
-        t1.order_id,
-        t1.customer_id,
-        t1.pizza_id,
-        t1.order_time,
-        t1.original_row_number,
-        t2.topping_id
-    FROM 
-        cte_cleaned_customer_orders AS t1
-    LEFT JOIN 
-        split_regular_toppings AS t2
-    ON 
-        t1.pizza_id = t2.pizza_id
-),
-split_exclusions AS (
-    SELECT
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        TRIM(SUBSTR(exclusions, 1, INSTR(exclusions || ',', ',') - 1)) AS topping_id,
-        SUBSTR(exclusions || ',', INSTR(exclusions || ',', ',') + 1) AS remaining_exclusions
-    FROM 
-        cte_cleaned_customer_orders
-    WHERE 
-        exclusions IS NOT NULL
+        pizza_line_id,
+        TRIM(SUBSTR(exclusions, 1, INSTR(exclusions || ',', ',') - 1)),
+        SUBSTR(exclusions || ',', INSTR(exclusions || ',', ',') + 1)
+    FROM delivered_pizzas
+    WHERE exclusions IS NOT NULL AND TRIM(exclusions) <> ''
     UNION ALL
     SELECT
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        TRIM(SUBSTR(remaining_exclusions, 1, INSTR(remaining_exclusions, ',') - 1)) AS topping_id,
-        SUBSTR(remaining_exclusions, INSTR(remaining_exclusions, ',') + 1) AS remaining_exclusions
-    FROM 
-        split_exclusions
-    WHERE
-        remaining_exclusions <> ''
+        pizza_line_id,
+        TRIM(SUBSTR(remaining, 1, INSTR(remaining, ',') - 1)),
+        SUBSTR(remaining, INSTR(remaining, ',') + 1)
+    FROM exclusion_parts
+    WHERE remaining <> ''
 ),
-split_extras AS (
+extra_parts(pizza_line_id, topping_id, remaining) AS (
     SELECT
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        TRIM(SUBSTR(extras, 1, INSTR(extras || ',', ',') - 1)) AS topping_id,
-        SUBSTR(extras || ',', INSTR(extras || ',', ',') + 1) AS remaining_extras
-    FROM 
-        cte_cleaned_customer_orders
-    WHERE 
-        extras IS NOT NULL
+        pizza_line_id,
+        TRIM(SUBSTR(extras, 1, INSTR(extras || ',', ',') - 1)),
+        SUBSTR(extras || ',', INSTR(extras || ',', ',') + 1)
+    FROM delivered_pizzas
+    WHERE extras IS NOT NULL AND TRIM(extras) <> ''
     UNION ALL
     SELECT
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        TRIM(SUBSTR(remaining_extras, 1, INSTR(remaining_extras, ',') - 1)) AS topping_id,
-        SUBSTR(remaining_extras, INSTR(remaining_extras, ',') + 1) AS remaining_extras
-    FROM 
-        split_extras
-    WHERE
-        remaining_extras <> ''
+        pizza_line_id,
+        TRIM(SUBSTR(remaining, 1, INSTR(remaining, ',') - 1)),
+        SUBSTR(remaining, INSTR(remaining, ',') + 1)
+    FROM extra_parts
+    WHERE remaining <> ''
 ),
-cte_combined_orders AS (
-    SELECT 
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        topping_id
-    FROM 
-        cte_base_toppings
-    WHERE topping_id NOT IN (SELECT topping_id FROM split_exclusions WHERE split_exclusions.order_id = cte_base_toppings.order_id)
+used_ingredients AS (
+    SELECT pizza.pizza_line_id, recipe.topping_id
+    FROM delivered_pizzas AS pizza
+    JOIN recipe_parts AS recipe ON pizza.pizza_id = recipe.pizza_id
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM exclusion_parts AS exclusion
+        WHERE exclusion.pizza_line_id = pizza.pizza_line_id
+          AND exclusion.topping_id = recipe.topping_id
+    )
     UNION ALL
-    SELECT 
-        order_id,
-        customer_id,
-        pizza_id,
-        order_time,
-        original_row_number,
-        topping_id
-    FROM 
-        split_extras
+    SELECT pizza_line_id, topping_id
+    FROM extra_parts
 )
 SELECT
-    t2.topping_name,
-    COUNT(*) AS topping_count
-FROM 
-    cte_combined_orders AS t1
-JOIN 
-    pizza_toppings AS t2
-ON 
-    t1.topping_id = t2.topping_id
-GROUP BY 
-    t2.topping_name
-ORDER BY 
-    topping_count DESC;
+    topping.topping_name,
+    COUNT(*) AS total_quantity
+FROM used_ingredients AS ingredient
+JOIN pizza_toppings AS topping
+  ON ingredient.topping_id = topping.topping_id
+GROUP BY topping.topping_id, topping.topping_name
+ORDER BY topping.topping_name;

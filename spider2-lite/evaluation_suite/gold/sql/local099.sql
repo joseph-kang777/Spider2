@@ -1,64 +1,36 @@
-WITH YASH_CHOPRAS_PID AS (
-    SELECT
-        TRIM(P.PID) AS PID
-    FROM
-        Person P
-    WHERE
-        TRIM(P.Name) = 'Yash Chopra'
+WITH yash_chopra AS (
+    SELECT DISTINCT TRIM(PID) AS director_id
+    FROM Person
+    WHERE TRIM(Name) = 'Yash Chopra'
 ),
-NUM_OF_MOV_BY_ACTOR_DIRECTOR AS (
+actor_director_movies AS (
     SELECT
-        TRIM(MC.PID) AS ACTOR_PID,
-        TRIM(MD.PID) AS DIRECTOR_PID,
-        COUNT(DISTINCT TRIM(MD.MID)) AS NUM_OF_MOV
-    FROM
-        M_Cast MC
-    JOIN
-        M_Director MD ON TRIM(MC.MID) = TRIM(MD.MID)
-    GROUP BY
-        ACTOR_PID,
-        DIRECTOR_PID
+        TRIM(actor_cast.PID) AS actor_id,
+        TRIM(director.PID) AS director_id,
+        COUNT(DISTINCT actor_cast.MID) AS movie_count
+    FROM M_Cast AS actor_cast
+    JOIN M_Director AS director ON actor_cast.MID = director.MID
+    GROUP BY TRIM(actor_cast.PID), TRIM(director.PID)
 ),
-NUM_OF_MOVIES_BY_YC AS (
+actor_collaboration_stats AS (
     SELECT
-        NM.ACTOR_PID,
-        NM.DIRECTOR_PID,
-        NM.NUM_OF_MOV AS NUM_OF_MOV_BY_YC
-    FROM
-        NUM_OF_MOV_BY_ACTOR_DIRECTOR NM
-    JOIN
-        YASH_CHOPRAS_PID YCP ON NM.DIRECTOR_PID = YCP.PID
-),
-MAX_MOV_BY_OTHER_DIRECTORS AS (
-    SELECT
-        ACTOR_PID,
-        MAX(NUM_OF_MOV) AS MAX_NUM_OF_MOV
-    FROM
-        NUM_OF_MOV_BY_ACTOR_DIRECTOR NM
-    JOIN
-        YASH_CHOPRAS_PID YCP ON NM.DIRECTOR_PID <> YCP.PID
-    GROUP BY
-        ACTOR_PID
-),
-ACTORS_MOV_COMPARISION AS (
-    SELECT
-        NMY.ACTOR_PID,
-        CASE WHEN NMY.NUM_OF_MOV_BY_YC > IFNULL(NMO.MAX_NUM_OF_MOV, 0) THEN 'Y' ELSE 'N' END AS MORE_MOV_BY_YC
-    FROM
-        NUM_OF_MOVIES_BY_YC NMY
-    LEFT OUTER JOIN
-        MAX_MOV_BY_OTHER_DIRECTORS NMO ON NMY.ACTOR_PID = NMO.ACTOR_PID
+        collaboration.actor_id,
+        MAX(
+            CASE
+                WHEN collaboration.director_id = yash.director_id
+                    THEN collaboration.movie_count
+            END
+        ) AS yash_chopra_movies,
+        MAX(
+            CASE
+                WHEN collaboration.director_id <> yash.director_id
+                    THEN collaboration.movie_count
+            END
+        ) AS other_director_movies
+    FROM actor_director_movies AS collaboration
+    CROSS JOIN yash_chopra AS yash
+    GROUP BY collaboration.actor_id
 )
-SELECT
-    COUNT(DISTINCT TRIM(P.PID)) AS "Number of actor"
-FROM
-    Person P
-WHERE
-    TRIM(P.PID) IN (
-        SELECT
-            DISTINCT ACTOR_PID
-        FROM
-            ACTORS_MOV_COMPARISION
-        WHERE
-            MORE_MOV_BY_YC = 'Y'
-    );
+SELECT COUNT(*) AS num_actors
+FROM actor_collaboration_stats
+WHERE yash_chopra_movies > COALESCE(other_director_movies, 0);

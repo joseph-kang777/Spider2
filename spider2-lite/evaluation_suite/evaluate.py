@@ -208,7 +208,7 @@ def get_sqlite_result(
                 return True, df
             except Exception as error:
                 if deadline is not None and time.monotonic() >= deadline and "interrupted" in str(error).lower():
-                    error_message = f"쿼리가 {timeout}초 후 시간 제한을 초과했습니다."
+                    error_message = f"Query timed out after {timeout} seconds."
                     print(f"{prefix}{error_message}")
                     return False, error_message
                 raise
